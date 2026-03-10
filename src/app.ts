@@ -33,9 +33,12 @@ app.use(helmet());
 // app.use(morgan("dev"));
 app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 300 }));
 
+// Apply JSON parser only to routes that need it
 app.use('/api/v1/auth', express.json({ limit: "1mb" }), authRoutes);
+
+// This route handles multipart/form-data, so it does NOT get the JSON parser
 app.use('/api/v1/listings', listingRoutes);
-app.use('/api/v1', express.json({ limit: "1mb" }), userRoutes); // This will handle /me
+app.use('/api/v1/users', express.json({ limit: "1mb" }), userRoutes); // This will handle /me
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 

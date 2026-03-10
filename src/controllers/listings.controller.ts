@@ -27,7 +27,7 @@ const makeUrl = (key: string) => {
   if (base) return `${base}/${key}`;
   const endpoint = process.env.S3_ENDPOINT?.replace(/\/$/, '');
   if (endpoint) return `${endpoint}/${BUCKET}/${key}`; // path-style, works with MinIO
-  return `https://${BUCKET}.s3.${REGION}.amazonaws.com/${key}`; // AWS default
+  return `https://${process.env.S3_BUCKET}.s3.${REGION}.amazonaws.com/${key}`; // AWS default
 };
 
 // ------------------------ CREATE ------------------------
@@ -105,25 +105,21 @@ export const createListing = async (req: Request, res: Response, next: NextFunct
 // ------------------------ READ ONE ------------------------
 export const getListing = async (req: Request, res: Response) => {
   const { id } = req.params;
-  const doc = await Listing.findById(id).lean();
+  const doc = await Listing.findById(id)
+    .populate<{ sellerId: { name: string; email: string; phone: string; city: string } }>(
+      'sellerId',
+      'name email phone city'
+    )
+    .lean();
+
   if (!doc || doc.status === 'deleted') {
     return res.status(404).json({ error: 'Not found' });
   }
 
-  // Attach public seller contact for detail page
-  const seller = await User.findById(doc.sellerId)
-    .select('name email phone city')
-    .lean()
-    .catch(() => null);
-
-  const item: any = {
-    ...doc,
-    seller: seller
-      ? { name: seller.name, email: seller.email, phone: seller.phone, city: seller.city }
-      : undefined,
-  };
-
-  return res.json(item); // or { item }
+  // The seller data is now populated directly on the document.
+  // For consistency with the previous structure, we can rename `sellerId` to `seller`.
+  const { sellerId: seller, ...rest } = doc;
+  return res.json({ ...rest, seller });
 };
 
 // ------------------------ LIST/SEARCH ------------------------
@@ -177,25 +173,29 @@ export const listListings = async (req: Request, res: Response) => {
 export const updateListing = async (req: Request, res: Response) => {
   const user = req.user;
   const { id } = req.params;
-  const listing = await Listing.findById(id);
+  // Using .lean() here is crucial to prevent Mongoose model state conflicts.
+  const listing = await Listing.findById(id).lean();
   if (!listing || listing.status === 'deleted') {
     return res.status(404).json({ error: 'Not found' });
   }
+  // The authorization check is now simpler because we used .lean()
   if (String(listing.sellerId) !== String(user?.sub) && user?.role !== 'admin') {
     return res.status(403).json({ error: 'Forbidden' });
   }
 
   const { title, description, category, price, condition, locationCity, status } = req.body;
 
-  if (title !== undefined) listing.title = title;
-  if (description !== undefined) listing.description = description;
-  if (category !== undefined) listing.category = category;
-  if (price !== undefined) listing.price = Number(price);
-  if (condition !== undefined) listing.condition = condition;
-  if (locationCity !== undefined) listing.locationCity = locationCity;
-  if (status !== undefined) listing.status = status; // owner can draft; admin might set deleted
+  const update: any = {};
+  if (title !== undefined) update.title = title;
+  if (description !== undefined) update.description = description;
+  if (category !== undefined) update.category = category;
+  if (price !== undefined) update.price = Number(price);
+  if (condition !== undefined) update.condition = condition;
+  if (locationCity !== undefined) update.locationCity = locationCity;
+  if (status !== undefined) update.status = status; // owner can draft; admin might set deleted
 
   // Optional removals: remove[]=key1&remove[]=key2 (query or body)
+  let currentImages = listing.images;
   const toRemove = ([] as string[]).concat(req.query.remove || req.body.remove || []);
   for (const key of toRemove) {
     const idx = listing.images.findIndex((img: any) => img.key === key);
@@ -203,6 +203,7 @@ export const updateListing = async (req: Request, res: Response) => {
       await s3.send(new DeleteObjectCommand({ Bucket: BUCKET, Key: key }));
       listing.images.splice(idx, 1);
     }
+    currentImages = listing.images;
   }
 
   // New uploads to append
@@ -235,14 +236,14 @@ export const updateListing = async (req: Request, res: Response) => {
       })
     );
 
-    listing.images.push({
+    currentImages.push({
       key: keyOrig,
       url: makeUrl(keyOrig),
       w: meta.width,
       h: meta.height,
       kind: 'orig',
     } as any);
-    listing.images.push({
+    currentImages.push({
       key: thumbKey,
       url: makeUrl(thumbKey),
       w: 800,
@@ -251,22 +252,25 @@ export const updateListing = async (req: Request, res: Response) => {
     } as any);
   }
 
-  await listing.save();
-  return res.json({ id: listing._id });
+  update.images = currentImages;
+
+  await Listing.updateOne({ _id: id }, { $set: update });
+  return res.json({ id });
 };
 
 // ------------------------ DELETE (soft) ------------------------
 export const deleteListing = async (req: Request, res: Response) => {
   const user = req.user;
-  const { id } = req.params;
-  const listing = await Listing.findById(id);
-  if (!listing) return res.status(404).json({ error: 'Not found' });
+  const { id } = req.params; // The ID of the listing to delete
+  const listing = await Listing.findById(id).lean(); // Use .lean() for a plain object
+  if (!listing || listing.status === 'deleted') return res.status(404).json({ error: 'Not found' });
 
-  if (String(listing.sellerId) !== String(user?.sub) && user?.role !== 'admin') {
+  // Check if the user is the seller or an admin. Use user.sub from the JWT.
+  if (String(listing.sellerId) !== user?.sub && user?.role !== 'admin') {
     return res.status(403).json({ error: 'Forbidden' });
   }
 
-  listing.status = 'deleted' as any;
-  await listing.save();
+  // Perform a soft delete by updating the status
+  await Listing.updateOne({ _id: id }, { $set: { status: 'deleted' } });
   return res.json({ success: true });
 };

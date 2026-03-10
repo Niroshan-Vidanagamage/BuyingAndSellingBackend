@@ -5,7 +5,7 @@
 //logout is no-op (JWT is stateless)
 
 import { Request, Response } from 'express';
-import jwt from 'jsonwebtoken';
+import jwt, { type Secret, type SignOptions } from 'jsonwebtoken';
 import User from '../models/User';
 import env from '../config/env';
 import { hashPassword, verifyPassword } from '../utils/passwords';
@@ -13,14 +13,28 @@ import { RegisterSchema, LoginSchema } from '../validation/auth.schema';
 import { created, ok, badRequest, unauthorized } from '../utils/responses';
 
 function signAccessToken(user: { _id: any; email: string; role?: string }) {
-    return jwt.sign({ sub: String(user._id), email: user.email, role: user.role || 'user' }, env.JWT_SECRET, { expiresIn: env.JWT_EXPIRES });
-}
+  const secret: Secret = env.JWT_SECRET;
+  const expiresIn: SignOptions['expiresIn'] =
+    env.JWT_EXPIRES as SignOptions['expiresIn'];
 
+  return jwt.sign(
+    { sub: String(user._id), email: user.email, role: user.role || 'user' },
+    secret,
+    { expiresIn }
+  );
+}
 
 function signRefreshToken(user: { _id: any; email: string }) {
-    return jwt.sign({ sub: String(user._id), email: user.email }, env.REFRESH_SECRET, { expiresIn: env.REFRESH_EXPIRES });
-}
+  const secret: Secret = env.REFRESH_SECRET;
+  const expiresIn: SignOptions['expiresIn'] =
+    env.REFRESH_EXPIRES as SignOptions['expiresIn'];
 
+  return jwt.sign(
+    { sub: String(user._id), email: user.email },
+    secret,
+    { expiresIn }
+  );
+}
 
 export async function register(req: Request, res: Response) {
     const parsed = RegisterSchema.safeParse(req.body);
