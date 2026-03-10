@@ -17,7 +17,7 @@ const r = Router();
 // --- Stripe Initialization ---
 // Ensure STRIPE_SECRET_KEY and FRONTEND_URL are in your backend's .env file
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2024-04-10',
+  apiVersion: '2025-09-30.clover',
 });
 
 r.get('/', listListings);

@@ -13,12 +13,11 @@ export const uploadPhotos = multer({
     limits: { fileSize: MAX_IMAGE_MB * 1024 * 1024, files: MAX_FILES },
     fileFilter: (_req, file, cb) => {
         const isAccepted = /^(image\/jpeg|image\/png|image\/webp)$/i.test(file.mimetype);
+
         if (isAccepted) {
-            if (err) {
-                return cb(err); // Error overload
-            }
-            return cb(null, true); // success overload
+            return cb(null, true);
         }
+
         return cb(new AppError('Only JPEG, PNG, and WebP images are allowed.', 400));
     }
 }).array('photos', MAX_FILES);
