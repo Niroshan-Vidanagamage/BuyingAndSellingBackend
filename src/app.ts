@@ -25,7 +25,9 @@ import { errorHandler } from './middleware/error';
 const app = express();
 
 // Define CORS options
-const corsOptions = { origin: "http://localhost:3000" };
+const corsOptions = {
+  origin: process.env.FRONTEND_URL || "http://localhost:3000",
+};
 
 app.use(cors(corsOptions));
 app.use(helmet());
